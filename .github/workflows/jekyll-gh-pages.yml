@@ -1,3 +1,4 @@
+
 name: Build and Deploy GitBook
 
 on:
@@ -36,57 +37,29 @@ jobs:
             done
           fi
           
-      - name: Auto-replace ANY icon patterns automatically
-        run: |
-          # Create a simple script to replace ANY icon: text with Font Awesome
-          cat << 'EOF' > replace_icons.py
-          import os
-          import re
-          import glob
+          # Check for missing files referenced in SUMMARY.md
+          if [ -f "SUMMARY.md" ]; then
+            grep -o '\[.*\]($$.*\.md$$)' SUMMARY.md | sed 's/.*($$.*\.md$$).*/\1/' | while read file; do
+              if [ ! -f "$file" ]; then
+                echo "Creating missing file: $file"
+                title=$(echo "$file" | sed 's/\.md$//' | sed 's/-/ /g' | sed 's/\b\w/\U&/g')
+                echo "# $title" > "$file"
+                echo "" >> "$file"
+                echo "This page is under construction." >> "$file"
+              fi
+            done
+          fi
           
-          # Pattern to match: icon: any-text-here or icons: any-text-here
-          pattern = r'icons?:?\s*([a-zA-Z0-9-]+)'
-          
-          def replace_icons_in_file(file_path):
-              with open(file_path, 'r', encoding='utf-8') as file:
-                  content = file.read()
-              
-              # Find all icon patterns
-              matches = re.finditer(pattern, content, re.IGNORECASE)
-              changes = []
-              
-              for match in matches:
-                  icon_text = match.group(1).lower().replace('-', ' ')
-                  # Convert to Font Awesome class format (fas fa-icon-name)
-                  fa_class = f"fas fa-{match.group(1).lower().replace(' ', '-')}"
-                  replacement = f'<i class="{fa_class}"></i>'
-                  
-                  # Replace only if not already replaced
-                  if match.group(0) not in content.replace(match.group(0), replacement):
-                      content = content.replace(match.group(0), replacement)
-                      changes.append(f"Replaced: {match.group(0)} → {fa_class}")
-              
-              if changes:
-                  with open(file_path, 'w', encoding='utf-8') as file:
-                      file.write(content)
-                  print(f"Updated {file_path}:")
-                  for change in changes:
-                      print(f"  {change}")
-          
-          # Process all markdown files
-          for md_file in glob.glob('**/*.md', recursive=True):
-              replace_icons_in_file(md_file)
-          EOF
-          
-          # Run the icon replacement
-          python3 replace_icons.py
-          
-      - name: Create book.json
+      - name: Create book.json with icon plugins
         run: |
           cat << 'EOF' > book.json
           {
             "title": "Your Documentation",
-            "plugins": ["-search", "fontsettings", "theme-default"],
+            "plugins": [
+              "-search", 
+              "fontsettings", 
+              "theme-default"
+            ],
             "pluginsConfig": {
               "fontsettings": {
                 "theme": "white"
@@ -95,36 +68,53 @@ jobs:
           }
           EOF
           
-      - name: Clean up markdown files
+      - name: Preprocess markdown files
         run: |
-          # Remove any problematic template syntax
-          find . -name "*.md" -exec sed -i 's/{%[^%]*%}//g' {} \;
-          find . -name "*.md" -exec sed -i 's/{{[^}]*}}//g' {} \;
+          find . -name "*.md" -type f -exec sed -i 's/{% hint style="$$[^"]*$$" %}/> **\U\1:** /g' {} \;
+          find . -name "*.md" -type f -exec sed -i 's/{% hint %}/> **INFO:** /g' {} \;
+          find . -name "*.md" -type f -exec sed -i 's/{% endhint %}/\n/g' {} \;
           
-      - name: Add Font Awesome styling
+          # Remove any remaining liquid template tags that might cause errors
+          find . -name "*.md" -type f -exec sed -i 's/{%[^%]*%}//g' {} \;
+          find . -name "*.md" -type f -exec sed -i 's/{{[^}]*}}//g' {} \;
+          
+      - name: Add Font Awesome and custom styles
         run: |
           mkdir -p styles
           cat << 'EOF' > styles/website.css
           @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
           
-          /* Style for auto-generated icons */
-          .markdown-section i[class^="fas fa-"] {
+          /* Icon replacements */
+          .markdown-section h1:before,
+          .markdown-section h2:before,
+          .markdown-section h3:before {
+            font-family: "Font Awesome 6 Free";
+            font-weight: 900;
             margin-right: 8px;
-            color: #007acc;
-            width: 16px;
-            text-align: center;
+          }
+          
+          /* Custom blockquote styling for hints */
+          .markdown-section blockquote {
+            border-left: 4px solid #007acc;
+            background: #f8f9fa;
+            padding: 12px 16px;
+            margin: 16px 0;
+            border-radius: 4px;
+          }
+          
+          .markdown-section blockquote p:first-child {
+            margin-top: 0;
+          }
+          
+          .markdown-section blockquote p:last-child {
+            margin-bottom: 0;
           }
           EOF
           
       - name: Build GitBook
         run: |
-          gitbook install
-          gitbook build
-          
-      - name: Ensure Font Awesome is included
-        run: |
-          # Add Font Awesome to all HTML files
-          find ./_book -name "*.html" -exec sed -i 's|</head>|<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"></head>|' {} \;
+          gitbook install --verbose
+          gitbook build --verbose
           
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
