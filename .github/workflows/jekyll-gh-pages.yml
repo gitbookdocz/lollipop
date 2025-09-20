@@ -38,7 +38,7 @@ jobs:
           
           # Check for missing files referenced in SUMMARY.md
           if [ -f "SUMMARY.md" ]; then
-            grep -o '\[.*\]($$.*\.md$$)' SUMMARY.md | sed 's/.*($$.*\.md$$).*/\1/' | while read file; do
+            grep -o '(\S*\.md)' SUMMARY.md | sed 's/[()]//g' | while read file; do
               if [ ! -f "$file" ]; then
                 echo "Creating missing file: $file"
                 title=$(echo "$file" | sed 's/\.md$//' | sed 's/-/ /g' | sed 's/\b\w/\U&/g')
@@ -48,6 +48,116 @@ jobs:
               fi
             done
           fi
+          
+      - name: Auto-replace icon patterns in markdown files
+        run: |
+          # Create a Python script to automatically find and replace icon patterns
+          cat << 'EOF' > replace_icons.py
+          import os
+          import re
+          import glob
+          
+          # Map of icon names to Font Awesome classes
+          icon_mapping = {
+              'envelope': 'fas fa-envelope',
+              'envelope-bulk': 'fas fa-envelope',
+              'arrow-up-right-dots': 'fas fa-arrow-up-right-dots',
+              'home': 'fas fa-home',
+              'gear': 'fas fa-cog',
+              'code': 'fas fa-code',
+              'book': 'fas fa-book',
+              'question': 'fas fa-question-circle',
+              'info': 'fas fa-info-circle',
+              'warning': 'fas fa-exclamation-triangle',
+              'danger': 'fas fa-exclamation-circle',
+              'success': 'fas fa-check-circle',
+              'star': 'fas fa-star',
+              'link': 'fas fa-link',
+              'download': 'fas fa-download',
+              'upload': 'fas fa-upload',
+              'settings': 'fas fa-cogs',
+              'user': 'fas fa-user',
+              'users': 'fas fa-users',
+              'calendar': 'fas fa-calendar',
+              'clock': 'fas fa-clock',
+              'search': 'fas fa-search',
+              'plus': 'fas fa-plus',
+              'minus': 'fas fa-minus',
+              'close': 'fas fa-times',
+              'check': 'fas fa-check',
+              'edit': 'fas fa-edit',
+              'trash': 'fas fa-trash',
+              'eye': 'fas fa-eye',
+              'lock': 'fas fa-lock',
+              'unlock': 'fas fa-unlock',
+              'image': 'fas fa-image',
+              'video': 'fas fa-video',
+              'audio': 'fas fa-music',
+              'file': 'fas fa-file',
+              'folder': 'fas fa-folder',
+              'cloud': 'fas fa-cloud',
+              'database': 'fas fa-database',
+              'server': 'fas fa-server',
+              'network': 'fas fa-network-wired',
+              'security': 'fas fa-shield-alt',
+              'bug': 'fas fa-bug',
+              'rocket': 'fas fa-rocket',
+              'lightbulb': 'fas fa-lightbulb',
+              'graduation': 'fas fa-graduation-cap',
+              'briefcase': 'fas fa-briefcase',
+              'globe': 'fas fa-globe',
+              'map': 'fas fa-map-marker-alt',
+              'phone': 'fas fa-phone',
+              'email': 'fas fa-envelope',
+              'chat': 'fas fa-comments',
+              'message': 'fas fa-comment',
+              'heart': 'fas fa-heart',
+              'thumbs-up': 'fas fa-thumbs-up',
+              'thumbs-down': 'fas fa-thumbs-down',
+              'smile': 'fas fa-smile',
+              'sad': 'fas fa-frown',
+              'angry': 'fas fa-angry'
+          }
+          
+          # Patterns to match (case insensitive)
+          patterns = [
+              r'icons?:\s*([a-zA-Z-]+)',  # matches: icon: envelope, icons: envelope-bulk
+              r'\[icon:\s*([a-zA-Z-]+)\]', # matches: [icon: envelope]
+              r'\{\{\s*icon\s*([a-zA-Z-]+)\s*\}\}', # matches: {{icon envelope}}
+              r'{%\s*icon\s*([a-zA-Z-]+)\s*%}', # matches: {%icon envelope%}
+          ]
+          
+          def replace_icons_in_file(file_path):
+              with open(file_path, 'r', encoding='utf-8') as file:
+                  content = file.read()
+              
+              original_content = content
+              changed = False
+              
+              for pattern in patterns:
+                  matches = re.finditer(pattern, content, re.IGNORECASE)
+                  for match in matches:
+                      icon_name = match.group(1).lower()
+                      if icon_name in icon_mapping:
+                          fa_class = icon_mapping[icon_name]
+                          replacement = f'<i class="{fa_class}"></i>'
+                          content = content.replace(match.group(0), replacement)
+                          changed = True
+                      else:
+                          print(f"Warning: Unknown icon '{icon_name}' in {file_path}")
+              
+              if changed:
+                  with open(file_path, 'w', encoding='utf-8') as file:
+                      file.write(content)
+                  print(f"Updated icons in: {file_path}")
+          
+          # Process all markdown files
+          for md_file in glob.glob('**/*.md', recursive=True):
+              replace_icons_in_file(md_file)
+          EOF
+          
+          # Run the icon replacement script
+          python3 replace_icons.py
           
       - name: Create book.json with icon plugins
         run: |
@@ -69,11 +179,7 @@ jobs:
           
       - name: Preprocess markdown files
         run: |
-          find . -name "*.md" -type f -exec sed -i 's/{% hint style="$$[^"]*$$" %}/> **\U\1:** /g' {} \;
-          find . -name "*.md" -type f -exec sed -i 's/{% hint %}/> **INFO:** /g' {} \;
-          find . -name "*.md" -type f -exec sed -i 's/{% endhint %}/\n/g' {} \;
-          
-          # Remove any remaining liquid template tags that might cause errors
+          # Clean up any remaining template syntax
           find . -name "*.md" -type f -exec sed -i 's/{%[^%]*%}//g' {} \;
           find . -name "*.md" -type f -exec sed -i 's/{{[^}]*}}//g' {} \;
           
@@ -83,13 +189,14 @@ jobs:
           cat << 'EOF' > styles/website.css
           @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
           
-          /* Icon replacements */
-          .markdown-section h1:before,
-          .markdown-section h2:before,
-          .markdown-section h3:before {
-            font-family: "Font Awesome 6 Free";
-            font-weight: 900;
+          /* Style for replaced icons */
+          .markdown-section i.fas,
+          .markdown-section i.far,
+          .markdown-section i.fab {
             margin-right: 8px;
+            color: #007acc;
+            width: 16px;
+            text-align: center;
           }
           
           /* Custom blockquote styling for hints */
@@ -114,6 +221,11 @@ jobs:
         run: |
           gitbook install --verbose
           gitbook build --verbose
+          
+      - name: Add Font Awesome to built HTML
+        run: |
+          # Add Font Awesome to all HTML files in the built site
+          find ./_book -name "*.html" -exec sed -i 's|</head>|<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"></head>|' {} \;
           
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
